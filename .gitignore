@@ -1,0 +1,27 @@
+# OpenClaw runtime files
+.gateway_startup_state
+exec-approvals.json
+
+# Logs
+logs/
+*.log
+
+# Credentials & secrets
+.openclaw/credentials/
+.openclaw/auth-profiles.json
+**/auth-profiles.json
+*.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Node modules (if any)
+node_modules/
+
+# Build artifacts
+dist/
+build/
+*.pyc
+__pycache__/

@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# summarize - CLI tool for the Summarizer skill
+# Usage: summarize [OPTIONS] [TEXT|FILE]
+
+set -e
+
+# Defaults
+LEVEL="standard"
+FORMAT="paragraph"
+AUDIENCE="general"
+MODEL="${SUMMARIZE_MODEL:-qwen3:8b}"
+
+show_help() {
+    cat << EOF
+summarize - Distill content to its essence
+
+USAGE:
+    summarize [OPTIONS] [TEXT]
+    summarize -f FILE [OPTIONS]
+
+OPTIONS:
+    -l, --level LEVEL      Compression level: tldr, brief, standard, extended (default: standard)
+    -f, --format FORMAT    Output format: bullets, paragraph, structured (default: paragraph)
+    -a, --audience AUD     Target audience: expert, general, executive, student (default: general)
+    -m, --model MODEL      Model override (default: \$SUMMARIZE_MODEL or qwen3:8b)
+    -h, --help             Show this help
+
+EXAMPLES:
+    summarize "Long text here..."
+    summarize -f file.txt -l brief -a executive
+    cat article.txt | summarize -l tldr
+EOF
+}
+
+# Parse arguments
+FILE=""
+TEXT=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h|--help) show_help; exit 0 ;;
+        -l|--level) LEVEL="$2"; shift 2 ;;
+        -f|--format) FORMAT="$2"; shift 2 ;;
+        -a|--audience) AUDIENCE="$2"; shift 2 ;;
+        -m|--model) MODEL="$2"; shift 2 ;;
+        -f|--file) FILE="$2"; shift 2 ;;
+        *) TEXT="$TEXT $1"; shift ;;
+    esac
+done
+
+# Read from file if specified
+if [[ -n "$FILE" ]]; then
+    TEXT=$(cat "$FILE")
+fi
+
+# Read from stdin if no text and stdin is not a tty
+if [[ -z "$TEXT" ]] && [[ ! -t 0 ]]; then
+    TEXT=$(cat)
+fi
+
+if [[ -z "$TEXT" ]]; then
+    echo "Error: No input provided. Use -h for help." >&2
+    exit 1
+fi
+
+# Build the prompt based on the skill's protocol
+PROMPT="You are an expert summarizer. Follow this protocol:
+
+1. ANALYZE: Consider the content's length, complexity, and my audience ($AUDIENCE).
+2. EXTRACT: Identify the core argument, key supporting points (3-5 max), and conclusions.
+3. COMPRESSION: Use '$LEVEL' level (tldr=1 sentence, brief=2-3 sentences, standard=paragraph, extended=multiple paragraphs).
+4. FORMAT: Output as '$FORMAT' (bullets for scanning, paragraph for reading, structured for reports).
+5. VERIFY: Ensure core message and key points are preserved.
+
+Content to summarize:
+---
+$TEXT
+---
+
+Output format:
+📝 SUMMARY ($LEVEL): [word count words]
+[Summary content]
+
+💡 KEY POINTS
+• [Point 1]
+• [Point 2]
+• [Point 3]
+
+⚠️ OMITTED (if relevant)
+[What was cut and why]"
+
+# Call the model
+echo "📝 Summarizing..." >&2
+ollama run "$MODEL" "$PROMPT"

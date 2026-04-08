@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "skills": {
+    "voice-call": {
+      "version": "0.1.0",
+      "installedAt": 1775115105160
+    },
+    "spotify-player": {
+      "version": "1.0.0",
+      "installedAt": 1775114247950
+    },
+    "summarizer": {
+      "version": "1.0.0",
+      "installedAt": 1775114325996
+    },
+    "sherpa-onnx-tts": {
+      "version": "0.1.0",
+      "installedAt": 1775114410762
+    },
+    "peekaboo": {
+      "version": "1.0.0",
+      "installedAt": 1775114486025
+    },
+    "openai-whisper": {
+      "version": "1.0.0",
+      "installedAt": 1775114544903
+    },
+    "summarize-pro": {
+      "version": "1.0.0",
+      "installedAt": 1775631323764
+    }
+  }
+}
