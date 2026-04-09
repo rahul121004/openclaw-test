@@ -1,0 +1,175 @@
+#!/usr/bin/env bash
+# linkedin - LinkedIn API CLI for lead generation
+# Usage: linkedin [COMMAND] [OPTIONS]
+
+set -e
+
+CREDENTIALS_FILE="$HOME/.openclaw/credentials/linkedin-oauth.json"
+TOKEN_FILE="$HOME/.openclaw/credentials/linkedin-token.json"
+
+# Load credentials
+if [[ ! -f "$CREDENTIALS_FILE" ]]; then
+    echo "Error: Credentials not found at $CREDENTIALS_FILE" >&2
+    exit 1
+fi
+
+# Parse credentials (simple format)
+CLIENT_ID=$(grep "Client ID" "$CREDENTIALS_FILE" | cut -d'=' -f2 | tr -d ' ')
+CLIENT_SECRET=$(grep "Client Secret" "$CREDENTIALS_FILE" | cut -d'=' -f2 | tr -d ' ')
+
+show_help() {
+    cat << EOF
+linkedin - LinkedIn API CLI for lead generation
+
+USAGE:
+    linkedin [COMMAND] [OPTIONS]
+
+COMMANDS:
+    auth        Start OAuth authorization flow
+    me          Get current user profile
+    search      Search for people/companies (lead gen)
+    connections List your connections
+    post        Create a post
+    companies   Search companies
+    help        Show this help
+
+EXAMPLES:
+    linkedin auth                    # Start authorization
+    linkedin me                      # Get your profile
+    linkedin search "software engineer" --location "India"
+    linkedin companies --industry "technology" --size "50-200"
+    linkedin connections --limit 50
+EOF
+}
+
+cmd_auth() {
+    echo "Step 1: Visit this URL to authorize:"
+    echo "https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=$CLIENT_ID&redirect_uri=http://localhost:8080&state=foo777&scope=r_liteprofile%20r_emailaddress%20w_member_social%20r_organization_social%20r_basicprofile"
+    echo ""
+    read -p "Enter the authorization code you receive: " AUTH_CODE
+    
+    echo "Step 2: Exchanging code for access token..."
+    RESPONSE=$(curl -s -X POST 'https://www.linkedin.com/oauth/v2/accessToken' \
+        -d "grant_type=authorization_code" \
+        -d "code=$AUTH_CODE" \
+        -d "redirect_uri=http://localhost:8080" \
+        -d "client_id=$CLIENT_ID" \
+        -d "client_secret=$CLIENT_SECRET")
+    
+    echo "$RESPONSE" | jq .
+    
+    # Save token if successful
+    if echo "$RESPONSE" | jq -e '.access_token' > /dev/null 2>&1; then
+        echo "$RESPONSE" > "$TOKEN_FILE"
+        echo "Token saved to $TOKEN_FILE"
+    else
+        echo "Failed to get access token" >&2
+        exit 1
+    fi
+}
+
+get_token() {
+    if [[ ! -f "$TOKEN_FILE" ]]; then
+        echo "Error: No access token. Run 'linkedin auth' first." >&2
+        exit 1
+    fi
+    
+    ACCESS_TOKEN=$(jq -r '.access_token' "$TOKEN_FILE")
+    
+    # Check if token is expired (simplified - in production check expires_in)
+    if [[ "$ACCESS_TOKEN" == "null" ]] || [[ -z "$ACCESS_TOKEN" ]]; then
+        echo "Error: Invalid or expired token. Run 'linkedin auth' again." >&2
+        exit 1
+    fi
+    
+    echo "$ACCESS_TOKEN"
+}
+
+api_call() {
+    local endpoint="$1"
+    local method="${2:-GET}"
+    local data="${3:-}"
+    
+    local token=$(get_token)
+    
+    if [[ "$method" == "GET" ]]; then
+        curl -s -H "Authorization: Bearer $token" \
+             -H "X-Restli-Protocol-Version: 2.0.0" \
+             "$endpoint"
+    else
+        curl -s -X "$method" \
+             -H "Authorization: Bearer $token" \
+             -H "X-Restli-Protocol-Version: 2.0.0" \
+             -H "Content-Type: application/json" \
+             -d "$data" \
+             "$endpoint"
+    fi
+}
+
+cmd_me() {
+    local token=$(get_token)
+    echo "Fetching your profile..."
+    api_call "https://api.linkedin.com/v2/me" | jq .
+}
+
+cmd_search() {
+    local query="$1"
+    local location="${2:-}"
+    
+    echo "Note: LinkedIn's person search API requires special permissions."
+    echo "Using alternative: searching posts mentioning your keywords..."
+    
+    # Search posts (available with basic permissions)
+    local encoded_query=$(echo "$query" | sed 's/ /%20/g')
+    api_call "https://api.linkedin.com/v2/socialActions?q=search&searchKeywords=$encoded_query" | jq .
+}
+
+cmd_connections() {
+    local limit="${1:-100}"
+    
+    echo "Fetching your connections (up to $limit)..."
+    # LinkedIn API only returns 1st degree connections with limited fields
+    api_call "https://api.linkedin.com/v2/connections?count=$limit" | jq .
+}
+
+cmd_companies() {
+    local industry="${1:-}"
+    local size="${2:-}"
+    
+    echo "Searching companies..."
+    # Get companies you follow or search by domain
+    api_call "https://api.linkedin.com/v2/organizations?projection=(elements*(vanityName,localizedName,logoV2(original~:playableStreams)))" | jq .
+}
+
+cmd_post() {
+    local text="$1"
+    
+    if [[ -z "$text" ]]; then
+        echo "Error: Post text required" >&2
+        exit 1
+    fi
+    
+    local token=$(get_token)
+    local person_urn=$(api_call "https://api.linkedin.com/v2/me" | jq -r '.id')
+    
+    echo "Creating post..."
+    api_call "https://api.linkedin.com/v2/shares" "POST" "{
+        \"text\": {
+            \"text\": \"$text\"
+        },
+        \"owner\": \"urn:li:person:$person_urn\",
+        \"subject\": \"Share\"
+    }" | jq .
+}
+
+# Main command dispatcher
+case "${1:-help}" in
+    auth) cmd_auth ;;
+    me) cmd_me ;;
+    search) cmd_search "$2" "$3" ;;
+    connections) cmd_connections "$2" ;;
+    companies) cmd_companies "$2" "$3" ;;
+    post) cmd_post "$2" ;;
+    help|--help|-h) show_help ;;
+    *) echo "Unknown command: $1" >&2; show_help; exit 1 ;;
+esac
